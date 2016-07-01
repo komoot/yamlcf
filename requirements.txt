@@ -1,0 +1,4 @@
+botocore==1.4.9
+argparse
+PyYaml
+

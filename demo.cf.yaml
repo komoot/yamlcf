@@ -1,0 +1,13 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Demo CloudFormation file
+
+Resources:
+  TestSecurityGroup:
+    Type : AWS::EC2::SecurityGroup
+    Properties:
+       GroupDescription: test
+Outputs:
+  Foo:
+   Value:
+    Ref:
+      TestSecurityGroup
