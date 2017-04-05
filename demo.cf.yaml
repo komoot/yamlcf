@@ -1,11 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Demo CloudFormation file
 
+Parameters:
+  GroupName:
+    Type: String
+    Default: test group
+
 Resources:
   TestSecurityGroup:
     Type : AWS::EC2::SecurityGroup
     Properties:
-       GroupDescription: test
+       GroupDescription: !Ref GroupName
 Outputs:
   Foo:
    Value:

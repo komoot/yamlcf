@@ -9,8 +9,8 @@ import botocore
 import botocore.session
 import botocore.exceptions
 import yaml
-import json
 import time
+
 
 def name_from_file(yaml_file):
     """
@@ -27,13 +27,16 @@ def log(line):
     print(line)
 
 
-def load(yaml_file):
-    with open(yaml_file, 'r') as f:
-        return yaml.load(f)
-
-
-def to_json(stack_document):
-    return json.dumps(stack_document, sort_keys=True, indent=4)
+def load(file_name):
+    """
+    Loads the given file name as yaml document
+    :param file_name:
+    :return: a yaml document as string with resolved aliases
+    """
+    with open(file_name, 'r') as f:
+        yaml_doc = yaml.load(f)
+        yaml.Dumper.ignore_aliases = lambda *args : True
+        return yaml.dump(yaml_doc)
 
 
 def retrieve_events(stack_name, last_shown_event_id=None, limit=None):
@@ -64,9 +67,17 @@ def retrieve_last_event_id(_stack_name):
         return None
 
 
+def show_summary(stack_name):
+    r = cf_client.describe_stacks(StackName=stack_name)
+    outputs = r['Stacks'][0].get('Outputs')
+    if outputs:
+        log("-------[ Stack output ]-------")
+        log(yaml.dump(outputs, default_flow_style=False))
+
+
 def check_finished(_waiter, stack_name):
     r = _waiter._operation_method(StackName=stack_name)
-    acceptors = list(waiter.config.acceptors)
+    acceptors = list(_waiter.config.acceptors)
     current_state = 'waiting'
     for acceptor in acceptors:
         if acceptor.matcher_func(r):
@@ -86,6 +97,20 @@ def check_finished(_waiter, stack_name):
         raise ValueError('Waiter encountered a terminal failure state')
 
 
+def wait_for(waiter_name, stack_name, e_id):
+    waiter = cf_client.get_waiter(waiter_name)
+    while waiter:
+        events = retrieve_events(stack_name, e_id)
+        print_events(events)
+        if len(events) > 0:
+            e_id = events[-1]['EventId']
+
+        if check_finished(waiter, stack_name):
+            log("----------------\nsuccessful")
+            waiter = None
+
+        time.sleep(1)
+
 def print_events(events):
     for event in events:
         description = event.get('ResourceStatusReason', '')
@@ -96,11 +121,10 @@ parser = argparse.ArgumentParser(description='Yet another cloudformation tool')
 parser.add_argument('command', metavar='command', help='create, update, delete')
 parser.add_argument('yaml_file', metavar='stack.cf.yaml', help='stack json or yaml file')
 parser.add_argument('--stack-name', metavar='stack name', required=False, help='use the given stack name, don\'t guess from filename')
-args = parser.parse_args()
+parser.add_argument('--on-failure', default='ROLLBACK', help='behavior for create failures: ROLLBACK, DELETE or DO_NOTHING')
+parser.add_argument('-p', '--parameter', dest='parameters', nargs='*', help='optional stack parameters as key=value')
 
-if args.command == "cat":
-    log(to_json(load(args.yaml_file)))
-    exit(0)
+args = parser.parse_args()
 
 # AWS configuration
 session = botocore.session.get_session()
@@ -115,13 +139,18 @@ log("Stack name:  {}".format(stack_name))
 
 last_shown_event_id = retrieve_last_event_id(stack_name)
 
-waiter = None
+parameters = []
+if args.parameters:
+    for p in args.parters:
+        key, value = p.split('=', 1)
+        parameters.append({'ParameterKey': key, 'ParameterValue': value})
+
 stack_document = None
 
 # Execute given command
 if args.command == "delete":
     cf_client.delete_stack(StackName=stack_name)
-    waiter = cf_client.get_waiter('stack_delete_complete')
+    wait_for('stack_delete_complete', stack_name, last_shown_event_id)
 
 elif args.command == "info":
     response = cf_client.describe_stacks(StackName=stack_name)
@@ -130,51 +159,35 @@ elif args.command == "info":
     log("Created at:  {}".format(stack['CreationTime']))
     log("Status:      {}".format(stack['StackStatus']))
     log("")
+    show_summary(stack_name)
 
-else:
+elif args.command == "update":
     stack_document = load(args.yaml_file)
-    if args.command == "update":
-        try:
-            response = cf_client.update_stack(
-                StackName=stack_name,
-                TemplateBody=to_json(stack_document),
-                Capabilities=[
-                    'CAPABILITY_IAM',
-                ])
-            waiter = cf_client.get_waiter('stack_update_complete')
-        except botocore.exceptions.ClientError as e:
-            message = e.response.get('Error', {}).get('Message')
-            if message == "No updates are to be performed.":
-                log(message)
-            else:
-                raise e
-
-    elif args.command == "create":
-        response = cf_client.create_stack(
+    try:
+        response = cf_client.update_stack(
             StackName=stack_name,
-            TemplateBody=to_json(stack_document),
+            TemplateBody=stack_document,
+            Parameters=parameters,
             Capabilities=[
                 'CAPABILITY_IAM',
             ])
-        waiter = cf_client.get_waiter('stack_create_complete')
+        wait_for('stack_update_complete', stack_name, last_shown_event_id)
+    except botocore.exceptions.ClientError as e:
+        message = e.response.get('Error', {}).get('Message')
+        if message == "No updates are to be performed.":
+            log(message)
+        else:
+            raise e
 
-
-while waiter:
-    events = retrieve_events(stack_name, last_shown_event_id)
-    print_events(events)
-    if len(events) > 0:
-        last_shown_event_id = events[-1]['EventId']
-
-    if check_finished(waiter, stack_name):
-        log("----------------\nsuccessful")
-        waiter = None
-
-    time.sleep(1)
-
-if not stack_document or 'Outputs' in stack_document:
-    response = cf_client.describe_stacks(StackName=stack_name)
-    outputs = response['Stacks'][0].get('Outputs')
-    if outputs:
-        log("-------[ Stack output ]-------")
-        log(yaml.dump(outputs, default_flow_style=False))
-
+elif args.command == "create":
+    stack_document = load(args.yaml_file)
+    response = cf_client.create_stack(
+        StackName=stack_name,
+        TemplateBody=stack_document,
+        Parameters=parameters,
+        OnFailure=args.on_failure,
+        Capabilities=[
+            'CAPABILITY_IAM',
+        ])
+    wait_for('stack_create_complete', stack_name, last_shown_event_id)
+    show_summary(stack_name)
