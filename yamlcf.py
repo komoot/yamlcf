@@ -141,7 +141,7 @@ last_shown_event_id = retrieve_last_event_id(stack_name)
 
 parameters = []
 if args.parameters:
-    for p in args.parters:
+    for p in args.parameters:
         key, value = p.split('=', 1)
         parameters.append({'ParameterKey': key, 'ParameterValue': value})
 
