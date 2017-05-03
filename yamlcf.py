@@ -9,6 +9,7 @@ import botocore
 import botocore.session
 import botocore.exceptions
 import yaml
+import json
 import time
 
 
@@ -24,6 +25,9 @@ def name_from_file(yaml_file):
 
 
 def log(line):
+    """
+    :param line: a line that is printed to stdout
+    """
     print(line)
 
 
@@ -71,8 +75,8 @@ def show_summary(stack_name):
     r = cf_client.describe_stacks(StackName=stack_name)
     outputs = r['Stacks'][0].get('Outputs')
     if outputs:
-        log("-------[ Stack output ]-------")
-        log(yaml.dump(outputs, default_flow_style=False))
+        for o in outputs:
+            print("{}: {}".format(o['OutputKey'], o['OutputValue']))
 
 
 def check_finished(_waiter, stack_name):
@@ -117,11 +121,32 @@ def print_events(events):
         log("{t} {ResourceType:<30} {ResourceStatus:<20} {description}".format(t=event['Timestamp'].strftime('%Y-%m-%d %H:%M:%S'), description=description, **event))
 
 
+def create_update_policy(allow_replace, allow_delete):
+    actions = ['Update:Modify']
+    if allow_delete:
+        actions.append('Update:Delete')
+    if allow_replace:
+        actions.append('Update:Replace')
+
+    return json.dumps({
+        "Statement": [{
+            "Effect": "Allow",
+            "Action": actions,
+            "Principal": "*",
+            "Resource": "*"
+        }]
+    })
+
+
+
 parser = argparse.ArgumentParser(description='Yet another cloudformation tool')
-parser.add_argument('command', metavar='command', help='create, update, delete')
+parser.add_argument('command', metavar='command', help='create, update, delete, dump')
 parser.add_argument('yaml_file', metavar='stack.cf.yaml', help='stack json or yaml file')
 parser.add_argument('--stack-name', metavar='stack name', required=False, help='use the given stack name, don\'t guess from filename')
 parser.add_argument('--on-failure', default='ROLLBACK', help='behavior for create failures: ROLLBACK, DELETE or DO_NOTHING')
+parser.add_argument('--allow-update-replace', default=False, action='store_true', help='allows replacement of resources on update')
+parser.add_argument('--allow-update-delete', default=False, action='store_true', help='allows deletion of resources on update')
+parser.add_argument('--force', '-f', default=False, action='store_true', help='force deletion or replacement on update or delete without asking')
 parser.add_argument('-p', '--parameter', dest='parameters', nargs='*', help='optional stack parameters as key=value')
 
 args = parser.parse_args()
@@ -147,7 +172,6 @@ if args.parameters:
 
 stack_document = None
 
-# Execute given command
 if args.command == "delete":
     cf_client.delete_stack(StackName=stack_name)
     wait_for('stack_delete_complete', stack_name, last_shown_event_id)
@@ -168,6 +192,7 @@ elif args.command == "update":
             StackName=stack_name,
             TemplateBody=stack_document,
             Parameters=parameters,
+            StackPolicyDuringUpdateBody=create_update_policy(args.force or args.allow_update_replace, args.force or args.allow_update_delete),
             Capabilities=[
                 'CAPABILITY_IAM',
             ])
@@ -191,3 +216,8 @@ elif args.command == "create":
         ])
     wait_for('stack_create_complete', stack_name, last_shown_event_id)
     show_summary(stack_name)
+
+
+elif args.command == "dump":
+    log(load(args.yaml_file))
+
