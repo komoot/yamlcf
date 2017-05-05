@@ -13,6 +13,22 @@ import json
 import time
 
 
+class GenericCompound:
+    def __init__(self, type):
+        self._type = type
+
+    @staticmethod
+    def to_yaml(dumper, data):
+        return data._type
+
+
+def default_constructor(loader, tag_suffix, node):
+    return GenericCompound(node)
+
+
+yaml.add_multi_constructor('', default_constructor, Loader=yaml.SafeLoader)
+yaml.add_representer(GenericCompound, GenericCompound.to_yaml, Dumper=yaml.SafeDumper)
+
 def name_from_file(yaml_file):
     """
         Takes a yaml file name and generates a stack-name from it.
@@ -31,16 +47,21 @@ def log(line):
     print(line)
 
 
-def load(file_name):
+def load(file_name, parsing=True):
     """
     Loads the given file name as yaml document
+    :param parsing: 
     :param file_name:
     :return: a yaml document as string with resolved aliases
     """
     with open(file_name, 'r') as f:
-        yaml_doc = yaml.load(f)
-        yaml.Dumper.ignore_aliases = lambda *args : True
-        return yaml.dump(yaml_doc)
+        if parsing:
+            log("parsing YAML file")
+            yaml_doc = yaml.safe_load(f)
+            yaml.Dumper.ignore_aliases = lambda *ignored_args: True
+            return yaml.safe_dump(yaml_doc, default_flow_style=False, allow_unicode=True)
+        else:
+            return f.read()
 
 
 def retrieve_events(stack_name, last_shown_event_id=None, limit=None):
@@ -118,7 +139,7 @@ def wait_for(waiter_name, stack_name, e_id):
 def print_events(events):
     for event in events:
         description = event.get('ResourceStatusReason', '')
-        log("{t} {ResourceType:<30} {ResourceStatus:<20} {description}".format(t=event['Timestamp'].strftime('%Y-%m-%d %H:%M:%S'), description=description, **event))
+        log("{t} {ResourceType:<30} {LogicalResourceId:<20} {ResourceStatus:<20} {description}".format(t=event['Timestamp'].strftime('%Y-%m-%d %H:%M:%S'), description=description, **event))
 
 
 def create_update_policy(allow_replace, allow_delete):
@@ -147,7 +168,9 @@ parser.add_argument('--on-failure', default='ROLLBACK', help='behavior for creat
 parser.add_argument('--allow-update-replace', default=False, action='store_true', help='allows replacement of resources on update')
 parser.add_argument('--allow-update-delete', default=False, action='store_true', help='allows deletion of resources on update')
 parser.add_argument('--force', '-f', default=False, action='store_true', help='force deletion or replacement on update or delete without asking')
+parser.add_argument('-n', '--no-parsing', dest='no_parsing', help='don\'t parse yaml file: Aliases are not resolved')
 parser.add_argument('-p', '--parameter', dest='parameters', nargs='*', help='optional stack parameters as key=value')
+
 
 args = parser.parse_args()
 
@@ -186,7 +209,7 @@ elif args.command == "info":
     show_summary(stack_name)
 
 elif args.command == "update":
-    stack_document = load(args.yaml_file)
+    stack_document = load(args.yaml_file, (not args.no_parsing))
     try:
         response = cf_client.update_stack(
             StackName=stack_name,
@@ -205,7 +228,7 @@ elif args.command == "update":
             raise e
 
 elif args.command == "create":
-    stack_document = load(args.yaml_file)
+    stack_document = load(args.yaml_file, (not args.no_parsing))
     response = cf_client.create_stack(
         StackName=stack_name,
         TemplateBody=stack_document,
@@ -219,5 +242,5 @@ elif args.command == "create":
 
 
 elif args.command == "dump":
-    log(load(args.yaml_file))
+    log(load(args.yaml_file, (not args.no_parsing)))
 
