@@ -1,11 +1,11 @@
 # yamlcf
 Plain YAML, plain CloudFormation command line client. Based on boto3.
 
-## Comapres to tool xy
+## Compares to tool xy
 What is the difference to the existing ```aws cloudformation [...]``` tool?
 
- - YAML support. Plain cloudformation json is also supported since json is also valid yaml.
- - Optimized for commandline usage and continous integration tools like jenkins:
+ - YAML support. Plain CloudFormation json is also supported since json is also valid yaml.
+ - Optimized for commandline usage and continuous integration tools like Jenkins:
     - Easy to see progress: Live log output.
     - Easy to use in build scripts: Waits for success and fails on error.
  - Convention-over-configuration: If you name your cloudformation file ```mystack.cf.yaml``` then yamlcf uses by default
@@ -13,9 +13,9 @@ What is the difference to the existing ```aws cloudformation [...]``` tool?
 
 
 What is the difference to high-level abstractions e.g. terraform? yamlcf does not extend CloudFormation or introduce a custom DSL, it is just a tool for easier usage.
-You can simply rely on the given cloudformation documentation of AWS (and the AWS support).
+You can simply rely on the given CloudFormation documentation of AWS (and the AWS support).
 
-No tool dependency: Just convert your yaml back to json and use the AWS cloud-formation tools.
+No tool dependency: Just convert your yaml back to json and use the AWS CloudFormation tools.
 
 ## Usage
 
